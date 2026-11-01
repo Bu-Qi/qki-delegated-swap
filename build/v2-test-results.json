@@ -1,0 +1,26 @@
+{
+  "environment": "Local QKI EVM and constant-product pools; no live transactions",
+  "passed": 19,
+  "failed": 0,
+  "tests": [
+    "explicit 10% sender-tax cap: holder pays 110, first pool receives 100, keeper receives no assets",
+    "no extra-tax consent: cap 100 rejects a 110 debit and rolls back balances, allowance, pools and count",
+    "tax increases above the holder cap fail before swapping",
+    "actual output minimum remains enforced with sender tax",
+    "receiver-deducted input tax uses real pool input",
+    "output tax is measured at the holder rather than the pool transfer amount",
+    "intermediate receiver-deducted tax is handled from actual next-pool input",
+    "intermediate sender tax that breaks the pool invariant rolls the complete swap back",
+    "funding never uses historical token donations in the helper",
+    "designated executor and holder are allowed, other accounts are rejected",
+    "only holder can cancel; pause is scoped to that holder",
+    "sender-tax token cannot reenter a second order",
+    "same-pool cycles are rejected; distinct-pool cycles remain valid",
+    "cap-based cumulative budget remains finite across different keepers",
+    "allowance must cover sender-paid tax and can be revoked",
+    "missing pools, invalid cap and overflowing total budget are rejected",
+    "an expired order cannot consume holder tokens",
+    "V2 runtime with the real router immutable matches the frontend whitelist",
+    "no-return ERC20 input works without any helper-to-router approval"
+  ]
+}

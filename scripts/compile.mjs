@@ -15,7 +15,7 @@ export function compile(includeTests = false) {
     language: 'Solidity', sources,
     settings: {
       optimizer: { enabled: true, runs: 200 }, evmVersion: 'paris',
-      outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object', 'evm.deployedBytecode.object', 'evm.deployedBytecode.immutableReferences', 'metadata'] } }
+      outputSelection: { '*': { '*': ['abi', 'storageLayout', 'evm.bytecode.object', 'evm.deployedBytecode.object', 'evm.deployedBytecode.immutableReferences', 'metadata'] } }
     }
   };
   const imports = {};
@@ -79,7 +79,7 @@ export function writeArtifacts() {
     ...input, sources: { 'QKIDelegatedMultiHop.sol': { content: flattened } }
   }, null, 2));
   const verifiedRouter = '0x3c91FD5247B050A1536F24D012a17a618EEFbfCA';
-  const runtimeHashes = [artifact, check.contracts['QKIDelegatedMultiHop.sol'].QKIDelegatedMultiHop].map(contract => {
+  function runtimeHash(contract) {
     let runtime = contract.evm.deployedBytecode.object;
     const references = Object.values(contract.evm.deployedBytecode.immutableReferences).flat();
     if (Object.keys(contract.evm.deployedBytecode.immutableReferences).length !== 1) throw new Error('Unexpected immutable layout');
@@ -89,13 +89,32 @@ export function writeArtifacts() {
     }
     const trailerBytes = parseInt(runtime.slice(-4),16) + 2;
     return keccak256('0x'+runtime.slice(0,-trailerBytes*2));
-  });
+  }
+  const v1Hashes = [artifact, check.contracts['QKIDelegatedMultiHop.sol'].QKIDelegatedMultiHop].map(runtimeHash);
+  // Retain the previously published V1 executable identity for existing deployments.
+  v1Hashes.push('0x02aaba8eb298aeaab9914ff2abeb60a4bf8e2236bdb4f716e297c0e9869d430a');
+  const v2=output.contracts['contracts/QKIDelegatedMultiHopV2.sol'].QKIDelegatedMultiHopV2;
+  fs.writeFileSync('build/QKIDelegatedMultiHopV2.abi.json',JSON.stringify(v2.abi,null,2));
+  fs.writeFileSync('build/QKIDelegatedMultiHopV2.bin',v2.evm.bytecode.object+'\n');
+  fs.writeFileSync('build/QKIDelegatedMultiHopV2.storage-layout.json',JSON.stringify(v2.storageLayout,null,2));
+  fs.writeFileSync('build/standard-input-v2.json',JSON.stringify(input,null,2));
+  fs.writeFileSync('build/compiler-v2.json',JSON.stringify({version:solc.version(),optimizer:input.settings.optimizer,evmVersion:input.settings.evmVersion,deployedBytecodeBytes:v2.evm.deployedBytecode.object.length/2},null,2));
+  visited.clear();
+  const flattenedV2='// SPDX-License-Identifier: MIT\npragma solidity 0.8.24;\n\n// Includes unmodified logic from OpenZeppelin Contracts v5.0.2 (MIT).\n'+flatten('contracts/QKIDelegatedMultiHopV2.sol');
+  fs.writeFileSync('QKIDelegatedMultiHopV2.sol',flattenedV2);
+  const flatInputV2={...input,sources:{'QKIDelegatedMultiHopV2.sol':{content:flattenedV2}}};
+  const checkV2=JSON.parse(solc.compile(JSON.stringify(flatInputV2)));
+  const errorsV2=(checkV2.errors||[]).filter(e=>e.severity==='error');
+  if(errorsV2.length)throw new Error(errorsV2.map(e=>e.formattedMessage).join('\n'));
+  fs.writeFileSync('build/flattened-standard-input-v2.json',JSON.stringify(flatInputV2,null,2));
+  const v2Hashes=[v2,checkV2.contracts['QKIDelegatedMultiHopV2.sol'].QKIDelegatedMultiHopV2].map(runtimeHash);
   fs.writeFileSync('build/contract-verification.json', JSON.stringify({
     router:verifiedRouter, chainId:20181205,
-    compiler:solc.version(), runtimeHashes:[...new Set(runtimeHashes)],
+    currentVersion:2,compiler:solc.version(),runtimeHashes:[...new Set([...v1Hashes,...v2Hashes])],
+    v1RuntimeHashes:[...new Set(v1Hashes)],v2RuntimeHashes:[...new Set(v2Hashes)],
     note:'Runtime executable hash with fixed router; compiler CBOR metadata excluded.'
   },null,2));
-  console.log(`Compiled original and flattened Solidity ${solc.version()} (Paris). Runtime ${artifact.evm.deployedBytecode.object.length / 2} bytes.`);
+  console.log(`Compiled V1 and V2, original and flattened, Solidity ${solc.version()} (Paris). Runtime V1 ${artifact.evm.deployedBytecode.object.length/2} bytes; V2 ${v2.evm.deployedBytecode.object.length/2} bytes.`);
   return artifact;
 }
 

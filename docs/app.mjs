@@ -1,11 +1,11 @@
-import { CHAIN_ID, ROUTER, RPCS, ZERO, UINT64_MAX, positiveInteger, parseTokenAmount, parsePath, budgetFor, orderState, stripSolidityMetadata, shortAddress } from './core.mjs';
-import { buildDeploymentPlan, deploymentStillMatches } from './deployment.mjs';
+import { CHAIN_ID, ROUTER, RPCS, ZERO, UINT64_MAX, positiveInteger, parseTokenAmount, parsePath, budgetFor, normalizeOrder, orderState, stripSolidityMetadata, shortAddress } from './core.mjs?v=2.0.0';
+import { buildDeploymentPlan, deploymentStillMatches } from './deployment.mjs?v=2.0.0';
 
 const $ = id => document.getElementById(id);
 const NETWORK = { chainId: Number(CHAIN_ID), name: 'QKI' };
 const TOKEN_ABI = ['function decimals() view returns(uint8)','function symbol() view returns(string)','function balanceOf(address) view returns(uint256)','function allowance(address,address) view returns(uint256)','function approve(address,uint256)'];
-const state = { reader: null, wallet: null, ethereum: null, account: null, chain: null, busy: false, verified: null, loaded: null, tokens: null, revision: 0, rpcRevision: 0, deployment:null, pendingDeployment:null };
-let ethers, ABI, TRUST, DEPLOY, messageTimer;
+const state = { reader: null, wallet: null, ethereum: null, account: null, chain: null, busy: false, verified: null, verifiedVersion:null, loaded: null, tokens: null, revision: 0, rpcRevision: 0, deployment:null, pendingDeployment:null };
+let ethers, ABI, ABI_V1, TRUST, DEPLOY, messageTimer;
 const errorLabels = { OrderNotFound:'订单不存在，请核对合约地址和订单 ID。', NotOrderOwner:'只有订单持有人可以执行此操作。', ExecutorNotAllowed:'当前地址没有执行权限。', OrderCancelled:'订单已取消。', OrderExpired:'订单已过期。', ExecutionsExhausted:'订单的执行次数已经用尽。', OwnerPaused:'持有人暂停了订单。', UnexpectedHolderDebit:'代币对持有人额外扣费，本合约不支持这种发送者税。', UnexpectedInputReceipt:'收到的输入代币数量异常，请检查扣税模式。', UnexpectedInputRemainder:'Router 没有准确消耗本次输入，交易已回滚。', InsufficientActualOutput:'实际到账低于订单最低要求，交易将回滚。', InvalidPath:'交易路径不符合合约要求。', InvalidConfig:'订单金额、次数或有效期不符合合约要求。', SafeERC20FailedOperation:'代币转账失败，请检查余额、授权与代币限制。', ERC20InsufficientAllowance:'持有人的代币授权不足。', ERC20InsufficientBalance:'持有人的代币余额不足。' };
 
 function message(text, error = false) {
@@ -16,10 +16,13 @@ function explain(error) {
   if (error?.code === 'ACTION_REJECTED' || error?.code === 4001) return '已取消钱包请求。';
   if (error?.code === 'INSUFFICIENT_FUNDS') return '执行钱包的 QKI 不足以支付 Gas。';
   const name = error?.revert?.name;
+  const v2Errors={HolderDebitExceeded:'实际扣款（含税）超过持有人设定的上限，交易已回滚。修改上限须由持有人创建新订单。',InvalidHolderDebit:'输入代币的余额变化异常，本次交易已回滚。',RepeatedPair:'路径重复使用同一交易池，V2 不支持这种路径。',InvalidPair:'路径中存在未建立的交易池。',PairHasNoInput:'某一跳的交易池没有收到可兑换的输入。'};
+  if(v2Errors[name])return v2Errors[name];
+  if(name==='UnexpectedHolderDebit')return 'V1 检测到扣款与输入量不一致。发送者额外税需要部署 V2，并由持有人设定最大扣款。';
   if (errorLabels[name]) return errorLabels[name];
   for (const candidate of [error?.data, error?.info?.error?.data?.result, error?.info?.error?.data]) {
     if (typeof candidate !== 'string' || !candidate.startsWith('0x')) continue;
-    try { const parsed = new ethers.Interface(ABI).parseError(candidate); if (errorLabels[parsed?.name]) return errorLabels[parsed.name]; } catch {}
+    for(const abi of [ABI,ABI_V1])try { const parsed = new ethers.Interface(abi).parseError(candidate);if(v2Errors[parsed?.name])return v2Errors[parsed.name];if(parsed?.name==='UnexpectedHolderDebit')return 'V1 检测到扣款与输入量不一致。发送者额外税需要部署 V2，并由持有人设定最大扣款。';if (errorLabels[parsed?.name]) return errorLabels[parsed.name]; } catch {}
   }
   return String(error?.reason || error?.shortMessage || error?.message || '操作失败，请稍后重试。').slice(0, 340);
 }
@@ -95,13 +98,21 @@ async function ensureContract(provider = reader()) {
     state.verified = null; $('contract-state').textContent = '代码不匹配'; $('contract-state').className = 'badge bad';
     throw new Error('此合约代码与提供的源码不匹配，已禁止授权和交易。请使用说明中的编译设置部署。');
   }
-  const contract = new ethers.Contract(address, ABI, provider);
+  const version=TRUST.v2RuntimeHashes.includes(fingerprint)?2:1;
+  const contract = new ethers.Contract(address, version===2?ABI:ABI_V1, provider);
   const [chain, router] = await Promise.all([contract.QKI_CHAIN_ID(), contract.router()]);
   if (chain !== CHAIN_ID || router.toLowerCase() !== ROUTER.toLowerCase()) throw new Error('合约网络或 Router 配置不匹配。');
-  state.verified = address; storageSet('qki-delegated-contract', address);
-  $('contract-state').textContent = '源码匹配'; $('contract-state').className = 'badge good';
-  $('contract-hint').textContent = `运行时代码已核对 · Router ${shortAddress(router)} · 每笔交易前重新校验`;
+  state.verified = address;state.verifiedVersion=version;storageSet('qki-delegated-contract', address);
+  $('contract-state').textContent = version===2?'V2 · 源码匹配':'V1 · 原版合约'; $('contract-state').className = 'badge good';
+  $('contract-hint').textContent = version===2?`V2 支持持有人设置最大实际扣款 · Router ${shortAddress(router)} · 每笔交易前重新校验`:'这是 V1 合约：可继续查询和执行原有订单；发送者额外税需要部署 V2 并重新创建订单，旧合约不能升级。';
+  updateVersionSettings();
   return contract;
+}
+function updateVersionSettings(){
+  const v2=state.verifiedVersion!==1;
+  $('sender-tax-setting').hidden=!v2;$('legacy-fee-setting').hidden=v2;
+  $('compatibility-note').textContent=v2?'原生 QKI 需先包装成 WQKI。V2 将输入直接从持有人转入第一池，发送者税计入最大扣款；其他代币规则仍可能导致兑换回滚。':'V1 输入经过钱包、中转合约和交易池，可能发生两次转账税。发送者额外税需要使用 V2，旧合约无法升级。';
+  updateBudget();
 }
 function walletStatus() {
   const connected = !!state.account;
@@ -193,7 +204,7 @@ async function finishDeployment(receipt,pending) {
   const provider=state.wallet&&state.chain===CHAIN_ID?state.wallet:reader();
   await ensureContract(provider);
   state.pendingDeployment=null;state.deployment=null;storageRemove('qki-delegated-pending-deploy');
-  $('check-deployment').hidden=true;$('deploy-status').textContent='部署已确认，运行时代码已核对，新合约地址已填入上方。';
+  $('check-deployment').hidden=true;$('deploy-status').textContent=`V${state.verifiedVersion} 部署已确认，运行时代码已核对，新合约地址已填入上方。`;
   $('transaction-status').textContent='合约部署成功';
   $('deployed-address').hidden=false;$('deployed-address').replaceChildren();
   const link=document.createElement('a');link.href=`https://scan.qki.dev/address/${receipt.contractAddress}`;link.target='_blank';link.rel='noopener noreferrer';link.textContent=receipt.contractAddress;
@@ -235,7 +246,8 @@ function addressLink(element, address) {
   element.replaceChildren(); const a = document.createElement('a'); a.href = `https://scan.qki.dev/address/${address}`; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = shortAddress(address); a.title = address; element.append(a);
 }
 async function fetchOrder(provider, contract, id) {
-  const order = await contract.orders(id);
+  const version=contract.interface.getFunction('VERSION()')?2:1;
+  const order = normalizeOrder(await contract.orders(id),version);
   if (order.owner.toLowerCase() === ZERO) throw new Error('订单不存在，请检查订单 ID。');
   const [path, paused, block] = await Promise.all([contract.getOrderPath(id),contract.ownerPaused(order.owner),provider.getBlock('latest')]);
   const token = new ethers.Contract(path[0],TOKEN_ABI,provider);
@@ -243,7 +255,7 @@ async function fetchOrder(provider, contract, id) {
     token.balanceOf(order.owner),token.allowance(order.owner,contract.target),
     Promise.all([...path].map(address => tokenInfo(provider,address)))
   ]);
-  return {id, address:contract.target, order, path:[...path], paused, balance, allowance, tokens, timestamp:block.timestamp, fetchedAt:Date.now()};
+  return {id, address:contract.target, version, order, path:[...path], paused, balance, allowance, tokens, timestamp:block.timestamp, fetchedAt:Date.now()};
 }
 function eligibility(loaded = state.loaded) {
   if (!loaded) return {eligible:false,reason:'请先查询订单。'};
@@ -263,10 +275,11 @@ function renderOrder() {
   addressLink($('order-owner'),order.owner);
   if (order.executor.toLowerCase() === ZERO) $('order-executor').textContent = '任何地址'; else addressLink($('order-executor'),order.executor);
   $('order-count').textContent = `${order.remainingExecutions} 次`;
+  $('order-max-debit').textContent=amountText(order.maxHolderDebit,tokens[0])+(loaded.version===1?' · V1 固定':'');
   const date = new Date(Number(order.deadline)*1000); $('order-deadline').textContent = Number.isNaN(date.getTime()) ? `${order.deadline} UNIX 秒` : date.toLocaleString();
-  $('order-fee').textContent = order.feeOnTransfer ? '已开启' : '标准兑换';
-  $('order-funding').textContent = `${loaded.balance >= order.amountIn ? '余额足够' : '余额不足'} / ${loaded.allowance >= order.amountIn ? '授权足够' : '授权不足'}`;
-  $('order-gross').textContent = path[0].toLowerCase() === path.at(-1).toLowerCase() ? `循环路径最低代币毛收益：${amountText(order.minAmountOut-order.amountIn,tokens[0])}。未扣执行者 Gas。` : '输入与输出为不同代币，不直接按数量计算盈亏。';
+  $('order-fee').textContent = loaded.version===2?'V2 · 实际入池及到账校验':order.feeOnTransfer ? 'V1 · 已开启' : 'V1 · 标准兑换';
+  $('order-funding').textContent = `${loaded.balance >= order.maxHolderDebit ? '余额覆盖扣款上限' : '余额不足'} / ${loaded.allowance >= order.maxHolderDebit ? '授权覆盖扣款上限' : '授权不足'}`;
+  $('order-gross').textContent = path[0].toLowerCase() === path.at(-1).toLowerCase() ? `按最大扣款计算，循环路径最低代币毛收益：${amountText(order.minAmountOut-order.maxHolderDebit,tokens[0])}。未扣执行者 Gas。` : '输入与输出为不同代币，不直接按数量计算盈亏。';
   refreshButtons();
 }
 async function loadOrder() {
@@ -280,18 +293,22 @@ function ownerConfig() {
   const path = parsePath($('path').value).map(ethers.getAddress);
   if (!state.tokens || JSON.stringify(path) !== state.tokens.key) throw new Error('路径已变化，请先重新读取代币信息。');
   const amountIn = parseTokenAmount($('amount-in').value,state.tokens.input.decimals);
+  const version=state.verifiedVersion||2;
+  const maxHolderDebit=version===2?parseTokenAmount($('max-holder-debit').value.trim()||$('amount-in').value,state.tokens.input.decimals):amountIn;
+  if(maxHolderDebit<amountIn)throw new Error('最大实际扣款不能小于每次输入数量。');
   const minAmountOut = parseTokenAmount($('minimum-out').value,state.tokens.output.decimals);
   const maxExecutions = positiveInteger($('max-executions').value,UINT64_MAX);
   const time = new Date($('deadline').value).getTime();
   if (!Number.isFinite(time) || time <= Date.now()) throw new Error('请设置晚于当前时间的订单截止时间。');
   const deadline = BigInt(Math.floor(time/1000)); if (deadline > UINT64_MAX) throw new Error('截止时间超出范围。');
   const executorText = $('executor-address').value.trim(); const executor = executorText ? ethers.getAddress(executorText) : ZERO;
-  return {path,config:{amountIn,minAmountOut,maxExecutions,deadline,executor,feeOnTransfer:$('fee-mode').checked},budget:budgetFor(amountIn,maxExecutions)};
+  const config=version===2?{amountIn,maxHolderDebit,minAmountOut,maxExecutions,deadline,executor}:{amountIn,minAmountOut,maxExecutions,deadline,executor,feeOnTransfer:$('fee-mode').checked};
+  return {path,config,version,maxHolderDebit,budget:budgetFor(maxHolderDebit,maxExecutions)};
 }
 function updateBudget() {
   try {
     const data = ownerConfig(); $('budget').textContent=amountText(data.budget,state.tokens.input);
-    $('owner-warning').textContent = data.path[0] === data.path.at(-1) && data.config.minAmountOut <= data.config.amountIn ? '当前循环订单未设置正毛收益门槛，按此条件成交可能亏损。' : '授权对象为上方代执行合约，成交资产始终返回当前持有人。';
+    $('owner-warning').textContent = data.path[0] === data.path.at(-1) && data.config.minAmountOut <= data.maxHolderDebit ? '按最大扣款计算，当前循环订单未设置正毛收益门槛，按此条件成交可能亏损。' : `每次名义转出 ${amountText(data.config.amountIn,state.tokens.input)}，最多实际扣除 ${amountText(data.maxHolderDebit,state.tokens.input)}；剩余资金仍在持有人钱包。`;
   } catch { $('budget').textContent='读取代币并填写有效数量'; }
   refreshButtons();
 }
@@ -301,7 +318,9 @@ function refreshButtons() {
   $('execute-order').disabled = !result.eligible;
   $('execute-reason').textContent=result.reason;
   if (state.loaded) { $('order-status').textContent=result.label || '请重新查询'; $('order-status').className=`badge ${result.eligible?'good':'muted'}`; }
-  $('share-order').disabled=!state.loaded;
+  const currentOrder=state.loaded&&state.loaded.address.toLowerCase()===$('contract-address').value.trim().toLowerCase()&&state.loaded.id.toString()===$('order-id').value.trim();
+  $('share-order').disabled=!currentOrder;
+  $('copy-order-conditions').disabled=!currentOrder;
   let canCreate=false;
   try { ownerConfig(); canCreate=!!state.account && state.chain===CHAIN_ID && !!state.verified && state.verified.toLowerCase()===$('contract-address').value.trim().toLowerCase(); } catch {}
   $('approve-budget').disabled=!canCreate; $('create-order').disabled=!canCreate;
@@ -315,7 +334,9 @@ async function loadTokens() {
   const [input,output] = await Promise.all([tokenInfo(provider,path[0],true),tokenInfo(provider,path.at(-1),true)]);
   state.tokens={input,output,key}; $('input-symbol').textContent=`${input.symbol} · ${input.decimals} 位精度`;
   $('output-symbol').textContent=`${output.symbol} · ${output.decimals} 位精度`;
-  $('token-state').textContent=`${input.symbol} → ${output.symbol} · 已读取精度`; updateBudget();
+  $('token-state').textContent=`${input.symbol} → ${output.symbol} · 已读取精度`;
+  $('sender-tax-hint').textContent=input.address.toLowerCase()==='0xc431158227578c42fcf7dfc2be82ebce00bf2ac8'?'QANB 示例：名义转出 100000，若接受额外 10% 税，可明确填写最大扣款 110000。税额超过上限会回滚。':'留空表示最大扣款与输入数量相同，不允许额外扣款。请按输入代币的真实税费自行设置。';
+  updateBudget();
 }
 function gasOptions() { return {gasPrice:parseTokenAmount($('gas-price').value,9)}; }
 async function sendTransaction(title, contract, method, args = []) {
@@ -340,7 +361,7 @@ async function executeOrder() {
 async function approveBudget() {
   const data=ownerConfig(); const {account,signer,contract}=await signingContext();
   const token=new ethers.Contract(data.path[0],TOKEN_ABI,signer);
-  if (await token.balanceOf(account) < data.config.amountIn) throw new Error('当前钱包的输入代币余额不足以执行一次订单。');
+  if (await token.balanceOf(account) < data.maxHolderDebit) throw new Error('当前钱包的输入代币余额不足以覆盖一次最大扣款。');
   const current=await token.allowance(account,contract.target);
   if (current>=data.budget) {message('现有授权额度已覆盖本订单预算，无需再次授权。');return;}
   if (current>0n) {
@@ -382,11 +403,25 @@ async function shareOrder() {
   try { await navigator.clipboard.writeText(url.toString()); message('订单链接已复制。'); }
   catch { message(`当前浏览器不允许复制，订单 ID 为 ${state.loaded.id}，合约为 ${state.loaded.address}`); }
 }
+async function copyOrderConditions(){
+  if(!state.loaded)throw new Error('请先查询要复制条件的订单。');
+  const {order,path,tokens}=state.loaded;
+  if(tokens[0].decimals==null||tokens.at(-1).decimals==null)throw new Error('无法读取代币精度，请先核对路径。');
+  $('path').value=JSON.stringify(path);state.tokens={input:tokens[0],output:tokens.at(-1),key:JSON.stringify(path)};
+  $('amount-in').value=ethers.formatUnits(order.amountIn,tokens[0].decimals);$('minimum-out').value=ethers.formatUnits(order.minAmountOut,tokens.at(-1).decimals);
+  $('max-holder-debit').value=ethers.formatUnits(order.maxHolderDebit,tokens[0].decimals);$('max-executions').value=(order.remainingExecutions||1n).toString();
+  $('executor-address').value=order.executor.toLowerCase()===ZERO?'':order.executor;
+  $('fee-mode').checked=order.feeOnTransfer;
+  $('token-state').textContent=`${tokens[0].symbol} → ${tokens.at(-1).symbol} · 已复制精度`;
+  $('input-symbol').textContent=`${tokens[0].symbol} · ${tokens[0].decimals} 位精度`;$('output-symbol').textContent=`${tokens.at(-1).symbol} · ${tokens.at(-1).decimals} 位精度`;
+  activateTab('owner');updateBudget();message('条件已复制。迁移到 V2 后请重新核对最大扣款、期限和授权预算；旧订单不会自动迁移。');
+}
 async function init() {
-  const [abi,trust,deploy] = await Promise.all([fetch('contract.abi.json').then(r=>{if(!r.ok)throw new Error('ABI 加载失败');return r.json();}),fetch('trusted-bytecode.json').then(r=>{if(!r.ok)throw new Error('合约校验文件加载失败');return r.json();}),fetch('deployment.json').then(r=>{if(!r.ok)throw new Error('部署字节码加载失败');return r.json();})]);
-  ethers=window.ethers; if(!ethers)throw new Error('本地钱包签名库加载失败，请刷新页面。'); ABI=abi; TRUST=trust;DEPLOY=deploy;
+  const getJSON=async file=>{const r=await fetch(`${file}?v=2.0.0`,{cache:'no-store'});if(!r.ok)throw new Error(`${file} 加载失败`);return r.json();};
+  const [abi,abiV1,trust,deploy] = await Promise.all([getJSON('contract.abi.json'),getJSON('contract-v1.abi.json'),getJSON('trusted-bytecode.json'),getJSON('deployment.json')]);
+  ethers=window.ethers; if(!ethers)throw new Error('本地钱包签名库加载失败，请刷新页面。'); ABI=abi;ABI_V1=abiV1;TRUST=trust;DEPLOY=deploy;
   const deployment=await new ethers.ContractFactory(ABI,DEPLOY.bytecode).getDeployTransaction(ROUTER);
-  if(BigInt(DEPLOY.chainId)!==CHAIN_ID||DEPLOY.router.toLowerCase()!==ROUTER.toLowerCase()||DEPLOY.value!=='0'||deployment.data!==DEPLOY.data||ethers.keccak256(DEPLOY.data)!==DEPLOY.initCodeHash)throw new Error('部署数据校验失败，请刷新页面。');
+  if(DEPLOY.version!==2||BigInt(DEPLOY.chainId)!==CHAIN_ID||DEPLOY.router.toLowerCase()!==ROUTER.toLowerCase()||DEPLOY.value!=='0'||deployment.data!==DEPLOY.data||ethers.keccak256(DEPLOY.data)!==DEPLOY.initCodeHash)throw new Error('部署数据校验失败，请刷新页面。');
   const params=new URLSearchParams(location.search); const supplied=params.get('contract');
   if(params.has('deploy'))$('deploy-box').open=true;
   try{const pending=JSON.parse(storageGet('qki-delegated-pending-deploy')||'null');if(pending&&pending.chainId===CHAIN_ID.toString()&&/^0x[0-9a-fA-F]{64}$/.test(pending.hash)&&ethers.isAddress(pending.from)&&ethers.isAddress(pending.address)){state.pendingDeployment=pending;$('deploy-box').open=true;$('check-deployment').hidden=false;}}catch{}
@@ -395,16 +430,16 @@ async function init() {
   for(const url of RPCS){const option=document.createElement('option');option.value=url;option.textContent=new URL(url).hostname;$('rpc-select').append(option);}
   const savedRpc=storageGet('qki-delegated-rpc');if(savedRpc==='auto'||RPCS.includes(savedRpc))$('rpc-select').value=savedRpc;
   const until=new Date(Date.now()+20*60*1000);until.setMinutes(until.getMinutes()-until.getTimezoneOffset());$('deadline').value=until.toISOString().slice(0,16);
-  const actions={'connect':connectWallet,'switch-network':switchNetwork,'verify-contract':async()=>{await ensureContract();message('合约运行时代码与源码匹配。');},'load-order':loadOrder,'execute-order':executeOrder,'load-tokens':loadTokens,'approve-budget':approveBudget,'create-order':createOrder,'cancel-order':cancelOrder,'pause-orders':()=>pauseOrders(true),'resume-orders':()=>pauseOrders(false),'share-order':shareOrder,'estimate-deploy':prepareDeployment,'deploy-contract':deployContract,'check-deployment':checkDeployment};
+  const actions={'connect':connectWallet,'switch-network':switchNetwork,'verify-contract':async()=>{await ensureContract();message(`V${state.verifiedVersion} 合约运行时代码与源码匹配。`);},'load-order':loadOrder,'execute-order':executeOrder,'load-tokens':loadTokens,'approve-budget':approveBudget,'create-order':createOrder,'cancel-order':cancelOrder,'pause-orders':()=>pauseOrders(true),'resume-orders':()=>pauseOrders(false),'share-order':shareOrder,'copy-order-conditions':copyOrderConditions,'estimate-deploy':prepareDeployment,'deploy-contract':deployContract,'check-deployment':checkDeployment};
   for(const[id,fn]of Object.entries(actions))$(id).addEventListener('click',()=>run(fn));
   $('execute-tab').addEventListener('click',()=>activateTab('execute'));$('owner-tab').addEventListener('click',()=>activateTab('owner'));
-  $('contract-address').addEventListener('input',()=>{state.verified=null;state.loaded=null;++state.revision;$('empty-order').hidden=false;$('order-detail').hidden=true;$('contract-state').className='badge muted';$('contract-state').textContent='尚未核对';refreshButtons();});
+  $('contract-address').addEventListener('input',()=>{state.verified=null;state.verifiedVersion=null;state.loaded=null;++state.revision;$('empty-order').hidden=false;$('order-detail').hidden=true;$('contract-state').className='badge muted';$('contract-state').textContent='尚未核对';$('contract-hint').textContent='请填写并核对新部署的 V2 合约地址；不要填写 Router 地址。';updateVersionSettings();refreshButtons();});
   $('order-id').addEventListener('input',refreshButtons);
-  for(const id of ['path','amount-in','minimum-out','max-executions','deadline','executor-address','fee-mode'])$(id).addEventListener('input',updateBudget);
+  for(const id of ['path','amount-in','max-holder-debit','minimum-out','max-executions','deadline','executor-address','fee-mode'])$(id).addEventListener('input',updateBudget);
   $('rpc-select').addEventListener('change',chooseRpc);$('retry-rpc').addEventListener('click',chooseRpc);
   $('gas-price').addEventListener('input',()=>{state.deployment=null;$('deploy-gas-price').textContent=`${$('gas-price').value} Gwei`;$('deploy-cost').textContent='参数变化，请重新估算';refreshButtons();});
   $('order-id').addEventListener('keydown',event=>{if(event.key==='Enter')run(loadOrder);});
-  walletStatus();await chooseRpc();
+  updateVersionSettings();walletStatus();await chooseRpc();
   if(state.pendingDeployment)await run(checkDeployment);
   if(supplied&&params.get('order'))await run(loadOrder);
   setInterval(()=>{if(!state.busy)refreshButtons();},1000);

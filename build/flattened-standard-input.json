@@ -15,6 +15,7 @@
       "*": {
         "*": [
           "abi",
+          "storageLayout",
           "evm.bytecode.object",
           "evm.deployedBytecode.object",
           "evm.deployedBytecode.immutableReferences",

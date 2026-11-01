@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { parseTokenAmount, positiveInteger, parsePath, budgetFor, orderState, stripSolidityMetadata, UINT256_MAX, UINT64_MAX, ZERO } from '../docs/core.mjs';
+import { parseTokenAmount, positiveInteger, parsePath, budgetFor, normalizeOrder, orderState, stripSolidityMetadata, UINT256_MAX, UINT64_MAX, ZERO } from '../docs/core.mjs';
 import { keccak256 } from 'ethers';
 import { AbiCoder, BrowserProvider } from 'ethers';
 import ganache from 'ganache';
@@ -56,21 +56,31 @@ test('runtime verification removes only the declared metadata trailer',()=>{
  for(const code of ['0x','0x600100ff','bad'])assert.throws(()=>stripSolidityMetadata(code));
 });
 test('published ABI and verification whitelist match compiled artifacts',()=>{
- assert.deepEqual(JSON.parse(fs.readFileSync('docs/contract.abi.json')),JSON.parse(fs.readFileSync('build/QKIDelegatedMultiHop.abi.json')));
+ assert.deepEqual(JSON.parse(fs.readFileSync('docs/contract.abi.json')),JSON.parse(fs.readFileSync('build/QKIDelegatedMultiHopV2.abi.json')));
+ assert.deepEqual(JSON.parse(fs.readFileSync('docs/contract-v1.abi.json')),JSON.parse(fs.readFileSync('build/QKIDelegatedMultiHop.abi.json')));
  assert.deepEqual(JSON.parse(fs.readFileSync('docs/trusted-bytecode.json')),JSON.parse(fs.readFileSync('build/contract-verification.json')));
  const hashes=JSON.parse(fs.readFileSync('docs/trusted-bytecode.json')).runtimeHashes;
  assert(hashes.length>=1&&hashes.every(h=>/^0x[0-9a-f]{64}$/.test(h)));
 });
 const deployment=JSON.parse(fs.readFileSync('docs/deployment.json'));
 test('deployment data matches compiler bytecode and the fixed constructor argument',()=>{
- const bytecode='0x'+fs.readFileSync('build/QKIDelegatedMultiHop.bin','utf8').trim();
+ const bytecode='0x'+fs.readFileSync('build/QKIDelegatedMultiHopV2.bin','utf8').trim();
  assert.equal(deployment.bytecode,bytecode);
  assert.equal(deployment.data,bytecode+AbiCoder.defaultAbiCoder().encode(['address'],[deployment.router]).slice(2));
  assert.equal(deployment.initCodeHash,keccak256(deployment.data));
  assert.equal(deployment.chainId,20181205);
  assert.equal(deployment.value,'0');
+ assert.equal(deployment.version,2);
 });
 const deploymentFixture={account:a,chainId:20181205n,data:deployment.data,initCodeHash:deployment.initCodeHash,gasPrice:500000000000n,estimatedGas:123n,balance:1000000000000000000n,blockGasLimit:30000000n,now:1000};
+test('V1 and V2 orders decode into a common view without shifting amount fields',()=>{
+ const old=normalizeOrder({...order,minAmountOut:40n,feeOnTransfer:true},1);
+ const current=normalizeOrder({...order,maxHolderDebit:110n,minAmountOut:40n},2);
+ assert.equal(old.maxHolderDebit,100n);assert.equal(current.maxHolderDebit,110n);assert.equal(current.minAmountOut,40n);
+ assert.equal(orderState(current,{now:900,account:b,balance:105n,allowance:110n}).eligible,false);
+ assert.equal(orderState(current,{now:900,account:b,balance:110n,allowance:109n}).eligible,false);
+ assert.equal(budgetFor(current.maxHolderDebit,3n),330n);
+});
 test('deployment review rounds up gas buffer and shows a fixed maximum fee',()=>{
  const plan=buildDeploymentPlan(deploymentFixture);
  assert.equal(plan.gasLimit,148n);

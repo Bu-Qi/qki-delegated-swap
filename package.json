@@ -1,12 +1,13 @@
 {
   "name": "qki-delegated-swap",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Holder-authorized QKI multihop keeper execution with fixed trade terms",
   "scripts": {
     "compile": "node scripts/compile.mjs",
     "test": "node test/delegated-swap.test.mjs",
     "build:frontend": "npm run compile && node scripts/build-frontend.mjs",
-    "test:frontend": "node test/frontend.test.mjs"
+    "test:frontend": "node test/frontend.test.mjs",
+    "test:v2": "node test/delegated-v2.test.mjs"
   },
   "keywords": [],
   "author": "",

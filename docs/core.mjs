@@ -39,13 +39,22 @@ export function budgetFor(amount, count) {
   if (amount <= 0n || count <= 0n || count > UINT64_MAX || amount > UINT256_MAX / count) throw new Error('订单预算超出合约允许范围。');
   return amount * count;
 }
+export function normalizeOrder(raw, version) {
+  if(version!==1&&version!==2)throw new Error('不支持的合约版本。');
+  return {owner:raw.owner,executor:raw.executor,amountIn:raw.amountIn,
+    maxHolderDebit:version===2?raw.maxHolderDebit:raw.amountIn,
+    minAmountOut:raw.minAmountOut,deadline:raw.deadline,
+    remainingExecutions:raw.remainingExecutions,cancelled:raw.cancelled,
+    feeOnTransfer:version===2?true:raw.feeOnTransfer,version};
+}
 export function orderState(order, { now, paused = false, account, balance, allowance }) {
   if (order.cancelled) return { label: '已取消', eligible: false, reason: '订单已被持有人取消。' };
   if (paused) return { label: '已暂停', eligible: false, reason: '持有人暂停了自己的订单。' };
   if (BigInt(now) > BigInt(order.deadline)) return { label: '已过期', eligible: false, reason: '订单已超过截止时间。' };
   if (BigInt(order.remainingExecutions) === 0n) return { label: '已完成', eligible: false, reason: '订单成功执行次数已用尽。' };
-  if (balance != null && balance < order.amountIn) return { label: '余额不足', eligible: false, reason: '持有人的输入代币余额不足。' };
-  if (allowance != null && allowance < order.amountIn) return { label: '授权不足', eligible: false, reason: '持有人对代执行合约的授权不足。' };
+  const cap=order.maxHolderDebit??order.amountIn;
+  if (balance != null && balance < cap) return { label: '余额不足', eligible: false, reason: '持有人的输入代币余额不足以覆盖一次最大扣款。' };
+  if (allowance != null && allowance < cap) return { label: '授权不足', eligible: false, reason: '持有人对代执行合约的授权不足以覆盖一次最大扣款。' };
   if (!account) return { label: '待执行', eligible: false, reason: '请连接执行钱包。' };
   const allowed = order.executor.toLowerCase() === ZERO || account.toLowerCase() === order.executor.toLowerCase() || account.toLowerCase() === order.owner.toLowerCase();
   if (!allowed) return { label: '指定地址执行', eligible: false, reason: '当前钱包不是指定执行者或持有人。' };

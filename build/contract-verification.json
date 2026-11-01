@@ -1,9 +1,17 @@
 {
   "router": "0x3c91FD5247B050A1536F24D012a17a618EEFbfCA",
   "chainId": 20181205,
+  "currentVersion": 2,
   "compiler": "0.8.24+commit.e11b9ed9.Emscripten.clang",
   "runtimeHashes": [
+    "0x02aaba8eb298aeaab9914ff2abeb60a4bf8e2236bdb4f716e297c0e9869d430a",
+    "0x615f5aa4484bbe8548789523237c7ca1c290f2dfc2df2edeb310146f25447216"
+  ],
+  "v1RuntimeHashes": [
     "0x02aaba8eb298aeaab9914ff2abeb60a4bf8e2236bdb4f716e297c0e9869d430a"
+  ],
+  "v2RuntimeHashes": [
+    "0x615f5aa4484bbe8548789523237c7ca1c290f2dfc2df2edeb310146f25447216"
   ],
   "note": "Runtime executable hash with fixed router; compiler CBOR metadata excluded."
 }
