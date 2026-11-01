@@ -1,0 +1,5 @@
+{
+  "passed": 13,
+  "failed": 0,
+  "environment": "Node boundary tests and Ganache local QKI EVM; no live wallet deployment"
+}

@@ -1,8 +1,14 @@
 import fs from 'node:fs';
+import { ContractFactory, keccak256 } from 'ethers';
 fs.mkdirSync('docs/vendor',{recursive:true});
 fs.copyFileSync('node_modules/ethers/dist/ethers.umd.min.js','docs/vendor/ethers.umd.min.js');
 fs.copyFileSync('node_modules/ethers/LICENSE.md','docs/vendor/ETHERS-LICENSE.md');
 fs.copyFileSync('build/QKIDelegatedMultiHop.abi.json','docs/contract.abi.json');
 fs.copyFileSync('build/contract-verification.json','docs/trusted-bytecode.json');
+const abi=JSON.parse(fs.readFileSync('build/QKIDelegatedMultiHop.abi.json','utf8'));
+const bytecode='0x'+fs.readFileSync('build/QKIDelegatedMultiHop.bin','utf8').trim();
+const router='0x3c91FD5247B050A1536F24D012a17a618EEFbfCA';
+const transaction=await new ContractFactory(abi,bytecode).getDeployTransaction(router);
+fs.writeFileSync('docs/deployment.json',JSON.stringify({chainId:20181205,router,bytecode,data:transaction.data,initCodeHash:keccak256(transaction.data),value:'0'},null,2)+'\n');
 fs.writeFileSync('docs/.nojekyll','');
 console.log('Static frontend ready in docs/; all signing code is served locally.');
