@@ -1,5 +1,5 @@
-import { CHAIN_ID, ROUTER, RPCS, ZERO, UINT64_MAX, positiveInteger, parseTokenAmount, parsePath, budgetFor, normalizeOrder, orderState, stripSolidityMetadata, shortAddress } from './core.mjs?v=2.0.0';
-import { buildDeploymentPlan, deploymentStillMatches } from './deployment.mjs?v=2.0.0';
+import { CHAIN_ID, ROUTER, RPCS, ZERO, UINT64_MAX, positiveInteger, parseTokenAmount, parsePath, budgetFor, normalizeOrder, orderState, stripSolidityMetadata, shortAddress } from './core.mjs?v=2.0.1';
+import { buildDeploymentPlan, deploymentStillMatches } from './deployment.mjs?v=2.0.1';
 
 const $ = id => document.getElementById(id);
 const NETWORK = { chainId: Number(CHAIN_ID), name: 'QKI' };
@@ -341,10 +341,12 @@ async function loadTokens() {
 function gasOptions() { return {gasPrice:parseTokenAmount($('gas-price').value,9)}; }
 async function sendTransaction(title, contract, method, args = []) {
   const options = gasOptions();
-  await contract[method].staticCall(...args,options);
   const estimate = await contract[method].estimateGas(...args,options);
+  // Bound eth_call as well: an omitted limit can trigger the node's 50M-gas balance check.
+  const transactionOptions = {...options,gasLimit:(estimate*120n+99n)/100n};
+  await contract[method].staticCall(...args,transactionOptions);
   $('transaction').hidden=false; $('transaction-label').textContent=title; $('transaction-status').textContent='请在钱包中确认'; $('transaction-link').hidden=true;
-  const transaction = await contract[method](...args,{...options,gasLimit:estimate*120n/100n});
+  const transaction = await contract[method](...args,transactionOptions);
   $('transaction-status').textContent='已提交，等待链上确认…'; $('transaction-link').href=`https://scan.qki.dev/tx/${transaction.hash}`; $('transaction-link').hidden=false;
   const receipt = await transaction.wait();
   if (!receipt || receipt.status !== 1) throw new Error('交易未成功确认，请查看链上交易状态。');
@@ -417,7 +419,7 @@ async function copyOrderConditions(){
   activateTab('owner');updateBudget();message('条件已复制。迁移到 V2 后请重新核对最大扣款、期限和授权预算；旧订单不会自动迁移。');
 }
 async function init() {
-  const getJSON=async file=>{const r=await fetch(`${file}?v=2.0.0`,{cache:'no-store'});if(!r.ok)throw new Error(`${file} 加载失败`);return r.json();};
+  const getJSON=async file=>{const r=await fetch(`${file}?v=2.0.1`,{cache:'no-store'});if(!r.ok)throw new Error(`${file} 加载失败`);return r.json();};
   const [abi,abiV1,trust,deploy] = await Promise.all([getJSON('contract.abi.json'),getJSON('contract-v1.abi.json'),getJSON('trusted-bytecode.json'),getJSON('deployment.json')]);
   ethers=window.ethers; if(!ethers)throw new Error('本地钱包签名库加载失败，请刷新页面。'); ABI=abi;ABI_V1=abiV1;TRUST=trust;DEPLOY=deploy;
   const deployment=await new ethers.ContractFactory(ABI,DEPLOY.bytecode).getDeployTransaction(ROUTER);

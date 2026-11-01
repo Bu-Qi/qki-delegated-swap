@@ -1,6 +1,6 @@
 {
   "name": "qki-delegated-swap",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Holder-authorized QKI multihop keeper execution with fixed trade terms",
   "scripts": {
     "compile": "node scripts/compile.mjs",

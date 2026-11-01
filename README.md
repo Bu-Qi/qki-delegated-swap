@@ -2,7 +2,7 @@
 
 持有人设定固定交易条件，其他地址支付 QKI Gas 执行。兑换结果始终返回持有人。V2 增加每次最大实际扣款，用于持有人明确接受的发送者额外税。
 
-[打开操作前端](https://qki-delegated-swap-console.mofei1-9304.chatgpt.site/) · [打开 V2 一键部署](https://qki-delegated-swap-console.mofei1-9304.chatgpt.site/?deploy=1&v=2)
+[打开 GitHub Pages 前端](https://bu-qi.github.io/qki-delegated-swap/) · [备用前端 / V2 一键部署](https://qki-delegated-swap-console.mofei1-9304.chatgpt.site/?deploy=1&v=2)
 
 当前前端默认部署 **QKIDelegatedMultiHopV2**。代码和页面发布不等于合约已经上链；部署、授权、创建订单均由你的钱包签名。
 
@@ -59,6 +59,8 @@ V2 不把输入先托管到中转合约，也不向 Router 设置代币授权，
 | 前端默认 Gas Price | 500 Gwei，可自行修改 |
 
 一键部署使用本项目的编译字节码，固定网络、Router 和 value=0。页面模拟部署、估算 Gas，增加 20% Gas 余量后显示最高费用；部署审阅与账户、网络、Gas Price 和字节码绑定，5 分钟后需要重新检查。交易哈希保存在当前浏览器，刷新后可查询部署结果，避免重复部署。
+
+订单执行、授权和管理操作同样先估算 Gas，再使用含 20% 余量的同一 Gas 上限进行预模拟与钱包提交，避免节点按默认 5000 万 Gas 检查余额，导致余额足够支付实际交易费用的钱包被错误拦截。
 
 每笔交易前，前端重新核对链 ID、Router 和对应版本的运行时代码指纹。编译器 CBOR 元数据不参与指纹，合约逻辑和 Router immutable 参与。若自行修改源码、编译器或优化设置，需要重新构建校验文件，不能直接绕过核验。
 
