@@ -1,0 +1,9 @@
+{
+  "router": "0x3c91FD5247B050A1536F24D012a17a618EEFbfCA",
+  "chainId": 20181205,
+  "compiler": "0.8.24+commit.e11b9ed9.Emscripten.clang",
+  "runtimeHashes": [
+    "0x02aaba8eb298aeaab9914ff2abeb60a4bf8e2236bdb4f716e297c0e9869d430a"
+  ],
+  "note": "Runtime executable hash with fixed router; compiler CBOR metadata excluded."
+}

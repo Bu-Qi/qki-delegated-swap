@@ -1,0 +1,30 @@
+{
+  "environment": "Ganache local EVM, QKI chain ID, mock tokens/router; no live-chain fork",
+  "passed": 23,
+  "failed": 0,
+  "tests": [
+    "approval alone creates no executable authority",
+    "any keeper executes multihop; all output reaches holder; router allowance cleared",
+    "another wallet cannot register an order against holder balance",
+    "designated executor enforced; holder retains execution rights",
+    "only holder may cancel; cancelled orders cannot run",
+    "holder pause covers all their orders and can be resumed",
+    "insufficient actual receipt reverts transfers and execution count, even if router skips check",
+    "cyclic route measures receipt after input pull, including gross profit floor",
+    "input transfer tax uses actual receipt and accounts for both transfer legs",
+    "standard mode rejects a taxed input instead of silently changing amount",
+    "output transfer tax is checked against actual holder balance",
+    "extra sender tax cannot exceed the fixed holder debit",
+    "router callback cannot execute a second order reentrantly",
+    "partial router consumption reverts rather than pooling holder funds",
+    "historical token donations are never spent by another order",
+    "finite execution budget is enforced across different keepers",
+    "ERC20 approval revocation immediately blocks unfilled orders",
+    "false-return ERC20 transfer is rejected",
+    "no-return ERC20 and zero-first approvals are supported",
+    "invalid configurations and paths are rejected",
+    "expired order rejects before spending tokens",
+    "native QKI transfers and non-contract routers are rejected",
+    "frontend runtime whitelist accepts the real constructor output with the fixed router"
+  ]
+}
