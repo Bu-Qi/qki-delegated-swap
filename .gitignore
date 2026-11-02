@@ -7,3 +7,5 @@ coverage/
 *.key
 *.log
 .DS_Store
+scanner/data/
+scanner/test-output/

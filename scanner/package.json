@@ -1,0 +1,21 @@
+{
+  "name": "qki-arbitrage-scanner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "QKI local arbitrage scanner with real-wallet simulations and manual wallet execution",
+  "scripts": {
+    "start": "node server.mjs",
+    "scan": "node cli.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ethers": "6.13.4"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}

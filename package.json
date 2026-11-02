@@ -7,7 +7,11 @@
     "test": "node test/delegated-swap.test.mjs",
     "build:frontend": "npm run compile && node scripts/build-frontend.mjs",
     "test:frontend": "node test/frontend.test.mjs",
-    "test:v2": "node test/delegated-v2.test.mjs"
+    "test:v2": "node test/delegated-v2.test.mjs",
+    "scanner:start": "node scanner/server.mjs",
+    "scanner:scan": "node scanner/cli.mjs",
+    "scanner:build": "node scripts/build-scanner.mjs",
+    "scanner:test": "node --test scanner/test/*.test.mjs"
   },
   "keywords": [],
   "author": "",

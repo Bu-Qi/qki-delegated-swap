@@ -1,0 +1,24 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {EventEmitter} from 'node:events';
+import http from 'node:http';
+import {createApp} from '../server.mjs';
+import {CHAIN} from '../lib/config.mjs';
+test('local API rejects cross-site requests, invalidates old reviews and makes confirmations single-use',async t=>{
+ const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'qki-scanner-test-')),owner='0x1111111111111111111111111111111111111111';let validated=0;
+ const services={prepare:async()=>({owner,tx:{from:owner,to:CHAIN.router},expiresAt:Date.now()+60000,meta:{}}),validatePrepared:async(c,r)=>{validated++;return {tx:r.tx};},receipt:async()=>null};
+ const app=createApp({dataDir,services,workerFactory:({config})=>{const w=new EventEmitter();w.terminate=async()=>{};setTimeout(()=>w.emit('message',{type:'done',report:{config,meta:{owner},scope:{},routes:[{id:'route-1'}],pendingApproval:[],cache:{chainId:CHAIN.id,knownPaths:[]}}}),15);return w;}});
+ await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));t.after(async()=>{await app.close();fs.rmSync(dataDir,{recursive:true,force:true});});const base='http://127.0.0.1:'+app.server.address().port;
+ const post=(endpoint,body,extra={})=>fetch(base+endpoint,{method:'POST',headers:{'content-type':'application/json',...extra},body:JSON.stringify(body)});
+ const evilStatus=await new Promise((resolve,reject)=>http.get(base+'/api/state',{headers:{host:'evil.invalid'}},res=>{res.resume();resolve(res.statusCode);}).on('error',reject));assert.equal(evilStatus,403);
+ assert.equal((await post('/api/scan',{config:{owner}},{Origin:'https://evil.invalid'})).status,403);
+ assert.equal((await post('/api/scan',{config:{owner}})).status,202);await new Promise(r=>setTimeout(r,30));
+ const prepare=()=>post('/api/prepare',{routeId:'route-1',owner});let review=await (await prepare()).json();assert(review.reviewId);
+ assert.equal((await post('/api/validate',{reviewId:review.reviewId,owner})).status,200);assert.equal((await post('/api/validate',{reviewId:review.reviewId,owner})).status,410);assert.equal(validated,1);
+ review=await (await prepare()).json();assert.equal((await post('/api/scan',{config:{owner},quick:true})).status,202);assert.equal((await post('/api/validate',{reviewId:review.reviewId,owner})).status,410);
+ await new Promise(r=>setTimeout(r,30));assert.equal((await post('/api/prepare',{approval:'false',owner})).status,404);
+ const page=await fetch(base+'/');assert.equal(page.status,200);assert((await page.text()).includes('QKI 套利扫描器'));assert(page.headers.get('content-security-policy').includes("frame-ancestors 'none'"));assert.equal((await fetch(base+'/package.json')).status,404);assert.equal((await fetch(base+'/vendor/ethers.js')).status,200);
+});
