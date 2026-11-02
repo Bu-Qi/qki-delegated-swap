@@ -35,7 +35,7 @@ export function createApp({dataDir=path.join(root,'data'),services={prepare,vali
   if(req.headers['sec-fetch-site']==='cross-site'){send(403,{error:'拒绝跨站请求。'});return;}
   const url=new URL(req.url,'http://'+host);
   try{
-   if(req.method==='GET'&&url.pathname==='/api/state'){send(200,{...state,chain:CHAIN,defaults:DEFAULTS,rpcs:RPCS});return;}
+   if(req.method==='GET'&&url.pathname==='/api/state'){send(200,{...state,application:{id:'qki-arbitrage-scanner',version:'1.0.1'},chain:CHAIN,defaults:DEFAULTS,rpcs:RPCS});return;}
    if(req.method==='GET'&&url.pathname==='/api/events'){res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache',connection:'keep-alive'});res.write(': connected\n\n');clients.add(res);const heartbeat=setInterval(()=>res.write(': heartbeat\n\n'),15000);req.on('close',()=>{clearInterval(heartbeat);clients.delete(res);});return;}
    if(req.method==='GET'&&url.pathname==='/api/export'){if(!state.report){send(404,{error:'请先完成扫描。'});return;}res.writeHead(200,{'content-type':'application/json; charset=utf-8','content-disposition':'attachment; filename="qki-arbitrage-'+Date.now()+'.json"','cache-control':'no-store'});res.end(json(state.report));return;}
    if(req.method==='POST'&&url.pathname.startsWith('/api/')){
@@ -71,7 +71,8 @@ export function createApp({dataDir=path.join(root,'data'),services={prepare,vali
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const args=process.argv.slice(2),index=args.indexOf('--port'),port=index>=0?Number(args[index+1]):3847;
  if(!Number.isInteger(port)||port<1024||port>65535)throw Error('Port must be between 1024 and 65535');
- const app=createApp();app.server.on('error',e=>{console.error(e.code==='EADDRINUSE'?'端口已被占用，请打开已运行的 http://127.0.0.1:'+port+' 或用 --port 换端口。':e.message);process.exitCode=1;});
- app.server.listen(port,'127.0.0.1',()=>{const url='http://127.0.0.1:'+port;console.log('\nQKI 套利扫描器 1.0\n'+url+'\n保持此窗口开启；Ctrl+C 关闭。\n');if(!args.includes('--no-open')){const [cmd,argv]=process.platform==='win32'?['cmd',['/c','start','',url]]:process.platform==='darwin'?['open',[url]]:['xdg-open',[url]];const p=spawn(cmd,argv,{stdio:'ignore'});p.on('error',()=>{});p.unref();}});
+ const dataIndex=args.indexOf('--data-dir');if(dataIndex>=0&&(!args[dataIndex+1]||args[dataIndex+1].startsWith('--')))throw Error('--data-dir 需要文件夹路径。');
+ const app=createApp(dataIndex>=0?{dataDir:path.resolve(args[dataIndex+1])}:{});app.server.on('error',e=>{console.error(e.code==='EADDRINUSE'?'端口已被占用，请打开已运行的 http://127.0.0.1:'+port+' 或用 --port 换端口。':e.message);process.exitCode=1;});
+ app.server.listen(port,'127.0.0.1',()=>{const url='http://127.0.0.1:'+port;console.log('\nQKI 套利扫描器 1.0.1\n'+url+'\n保持此窗口开启；Ctrl+C 关闭。\n');if(!args.includes('--no-open')){const [cmd,argv]=process.platform==='win32'?['cmd',['/c','start','',url]]:process.platform==='darwin'?['open',[url]]:['xdg-open',[url]];const p=spawn(cmd,argv,{stdio:'ignore'});p.on('error',()=>{});p.unref();}});
  process.on('SIGINT',()=>app.close().then(()=>process.exit(0)));
 }

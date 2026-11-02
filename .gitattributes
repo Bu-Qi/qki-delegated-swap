@@ -1,0 +1,3 @@
+# Preserve the Windows launcher bytes in GitHub ZIP downloads.
+scanner/start-windows.cmd -text whitespace=cr-at-eol
+start-scanner-windows.cmd -text whitespace=cr-at-eol

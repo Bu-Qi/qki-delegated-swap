@@ -4,7 +4,7 @@
 
 [打开 GitHub Pages 前端](https://bu-qi.github.io/qki-delegated-swap/) · [备用前端 / V2 一键部署](https://qki-delegated-swap-console.mofei1-9304.chatgpt.site/?deploy=1&v=2)
 
-新增 **[本地套利扫描程序](scanner/README.md)**：支持 USDT / 原生 QKI 循环扫描、含税模拟、Gas 净收益、钱包复核交易及成交后重算。Windows 解压后进入 `scanner`，双击 `start-windows.cmd`；需要 Node.js 20 或更新版本。
+新增 **[本地套利扫描程序](scanner/README.md)**：支持 USDT / 原生 QKI 循环扫描、含税模拟、Gas 净收益、钱包复核交易及成交后重算。Windows 完整解压后双击根目录 `start-scanner-windows.cmd`；需要 Node.js 20 或更新版本。1.0.1 增加常驻错误窗口和启动日志。
 
 当前前端默认部署 **QKIDelegatedMultiHopV2**。代码和页面发布不等于合约已经上链；部署、授权、创建订单均由你的钱包签名。
 
